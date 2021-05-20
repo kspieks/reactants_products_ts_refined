@@ -1,0 +1,16 @@
+################################################################################
+#
+#   Files for git to ignore
+#
+################################################################################
+
+# Any image files
+*.png
+*.svg
+*.pdf 
+
+# ipython checkpoints
+**/.ipynb_checkpoints/**
+
+# MacOS files
+.DS_Store

@@ -58,7 +58,7 @@ def parse_command_line_arguments(command_line_args=None):
                         default='b97d3/b97d3.csv',
                         help='path to csv containing wb97xd3 results')
     parser.add_argument('--temps', type=str, nargs=1,
-                        default='arkane_tempeatures.csv',
+                        default='arkane_temperatures.csv',
                         help='path to csv containing temperatures used during Arrhenius fitting')
   
     args = parser.parse_args(command_line_args)

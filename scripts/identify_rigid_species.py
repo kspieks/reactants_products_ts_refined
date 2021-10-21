@@ -58,6 +58,8 @@ def identify_rigid(args):
     params.removeHs = False
 
     rigid_reactions = [None] * df.shape[0]
+    methyl_rxns = [None] * df.shape[0]
+    methyl_rotor = Chem.MolFromSmarts('[CH3]')
 
     for i, row in df.iterrows():
         rmol = Chem.MolFromSmiles(row.rsmi, params)
@@ -85,10 +87,39 @@ def identify_rigid(args):
 
             if r_rigid * p_rigid:
                 rigid_reactions[i] = 'True'
+
+        # also accept rotatable bonds if they are just methyl rotors
+        elif (r_num_rotatable_bonds > 0) & (len(rmol.GetSubstructMatches(methyl_rotor)) == r_num_rotatable_bonds):
+            r_rigid = False
+            r_ring_bonds = rmol.GetRingInfo().BondRings()
+            if len(r_ring_bonds) == 0:
+                r_rigid = True      # no rings and no rotatable bonds
+            else:
+                r_rigid = is_ring_rigid(rmol, r_ring_bonds)
+
+            if r_rigid and (p_num_rotatable_bonds > 0):
+                # if each rotor in the product/s are also only methyl rotors, then accept the conformers for this rxn
+                if sum([len(pmol.GetSubstructMatches(methyl_rotor)) for pmol in pmols]) == p_num_rotatable_bonds:
+                    # any rings in the product/s should be planar
+                    p_rigid = True
+                    for pmol in pmols:
+                        p_ring_bonds = pmol.GetRingInfo().BondRings()
+                        if len(p_ring_bonds) == 0:
+                            p_rigid = p_rigid * True    # no rings and no rotatable bonds
+                        else:
+                            p_rigid = p_rigid * is_ring_rigid(pmol, p_ring_bonds)
+
+                    if r_rigid * p_rigid:
+                        methyl_rxns[i] = True
+
     num_rigid = sum([x is not None for x in rigid_reactions])
     print(f'Reactions where the stable species have no rotatable bonds: {num_rigid} i.e. {num_rigid/df.shape[0]*100:.1f}%')
-
     df.insert(df.shape[1], 'rigid', rigid_reactions, True)
+
+    num_methyl = sum([x is not None for x in methyl_rxns])
+    print(f'Reactions where the stable species only have methyl rotors as rotatable bonds: {num_methyl} i.e. {num_methyl/df.shape[0]*100:.1f}%')
+    df.insert(df.shape[1], 'methyl', methyl_rxns)
+
     df.to_csv(f'{args.lot}_cleaned_rigid_reactions.csv', index=False)
 
 

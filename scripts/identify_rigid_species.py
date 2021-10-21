@@ -1,17 +1,15 @@
 """
 Uses RDKit to identify molecules that have no rotatable bonds. 
 If rings are present, the rings must be planar (either aromatic or 3-membered).
-
-https://www.rdkit.org/docs/source/rdkit.Chem.rdMolDescriptors.html?highlight=maccs#rdkit.Chem.rdMolDescriptors.CalcNumRotatableBonds
 """
 
 import argparse
 import pandas as pd
 from rdkit import Chem
-from rdkit.Chem.rdMolDescriptors import CalcNumRotatableBonds
+from rdkit.Chem.Lipinski import RotatableBondSmarts
 
 
-def isRingAromatic(mol, bond_ring):
+def is_ring_aromatic(mol, bond_ring):
     """
     Helper function for identifying if a bond is aromatic
 
@@ -28,6 +26,24 @@ def isRingAromatic(mol, bond_ring):
     return True
 
 
+def is_ring_rigid(mol, ring_bonds):
+    """
+    Helper function for identifying if ring is rigid i.e. either aromatic or 3-membered
+
+    Args:
+        mol: rdkit molecule
+        ring_bonds: tuple containing the indices specifying which bonds are in a ring 
+    """
+    rigid = False
+    if len(ring_bonds) >= 2:
+        rigid = False
+    elif len(ring_bonds[0]) <= 3:
+        rigid = True
+    else:
+        rigid = is_ring_aromatic(mol, ring_bonds[0])
+
+    return rigid
+
 def identify_rigid(args):
     """
     Function for identifying reactions whose reactant and product/s are both rigid
@@ -38,38 +54,36 @@ def identify_rigid(args):
     df = pd.read_csv(args.csv)
     print(f'\nTotal reactions: {df.shape[0]}')
 
-    rigid_reactions = [None] * df.shape[0]
-    for i, (rsmi, psmi) in enumerate(zip(df.rsmi.values, df.psmi.values)):
-        rmol = Chem.AddHs(Chem.MolFromSmiles(rsmi))
-        pmols = [Chem.AddHs(Chem.MolFromSmiles(p)) for p in psmi.split('.')]
-        
-        r_num_rotatable_bonds = CalcNumRotatableBonds(rmol)
-        p_num_rotatable_bonds = [CalcNumRotatableBonds(pmol) for pmol in pmols]
+    params = Chem.SmilesParserParams()
+    params.removeHs = False
 
-        # if no rotatable bonds, ensure that any rings are either aromatic or 3-membered
-        if r_num_rotatable_bonds + np.sum(p_num_rotatable_bonds) == 0:
+    rigid_reactions = [None] * df.shape[0]
+
+    for i, row in df.iterrows():
+        rmol = Chem.MolFromSmiles(row.rsmi, params)
+        pmols = [Chem.MolFromSmiles(p, params) for p in row.psmi.split('.')]
+        
+        r_num_rotatable_bonds = len(rmol.GetSubstructMatches(RotatableBondSmarts))
+        p_num_rotatable_bonds = sum([len(pmol.GetSubstructMatches(RotatableBondSmarts)) for pmol in pmols])
+
+        # if no rotatable bonds, ensure that any rings are either aromatic or 3-membered so there are no ring conformers
+        if r_num_rotatable_bonds + p_num_rotatable_bonds == 0:
+            r_rigid = False
             r_ring_bonds = rmol.GetRingInfo().BondRings()
             if len(r_ring_bonds) == 0:
-                r_check = True
-            elif len(r_ring_bonds) >= 2:
-                r_check = False
-            elif len(r_ring_bonds[0]) <= 3:
-                r_check = True
+                r_rigid = True      # no rings and no rotatable bonds
             else:
-                r_check = isRingAromatic(rmol, r_ring_bonds[0])
+                r_rigid = is_ring_rigid(rmol, r_ring_bonds)
             
-            p_check = True
+            p_rigid = True
             for pmol in pmols:
                 p_ring_bonds = pmol.GetRingInfo().BondRings()
                 if len(p_ring_bonds) == 0:
-                    p_check = p_check * True
-                elif len(p_ring_bonds) >= 2:
-                    p_check = p_check * False
-                elif len(p_ring_bonds[0]) <= 3:
-                    p_check = p_check * True
+                    p_rigid = p_rigid * True    # no rings and no rotatable bonds
                 else:
-                    p_check = p_check * isRingAromatic(pmol, p_ring_bonds[0])
-            if r_check * p_check:
+                    p_rigid = p_rigid * is_ring_rigid(pmol, p_ring_bonds)
+
+            if r_rigid * p_rigid:
                 rigid_reactions[i] = 'True'
     num_rigid = sum([x is not None for x in rigid_reactions])
     print(f'Reactions where the stable species have no rotatable bonds: {num_rigid} i.e. {num_rigid/df.shape[0]*100:.1f}%')
@@ -90,9 +104,9 @@ def parse_command_line_arguments(command_line_args=None):
     """
 
     parser = argparse.ArgumentParser(description='Script to identify number of reactions with rigid species')
-    parser.add_argument('--csv', type=str, nargs=1, default='wb97xd3.csv',
+    parser.add_argument('--csv', type=str, default='wb97xd3.csv',
                         help='path to the csv containing info parsed from Arkane outputs')
-    parser.add_argument('--lot', type=str, nargs=1, default='wb97xd3', 
+    parser.add_argument('--lot', type=str, default='wb97xd3', 
                         help='level of theory used during the quantum calculations, used to name the new csv file')
     args = parser.parse_args(command_line_args)
 
@@ -105,7 +119,7 @@ def main():
     for arg in vars(args):
         print(f'{arg}: {getattr(args, arg)}')
 
-    calculate_torsion(args)
+    identify_rigid(args)
 
 
 if __name__ == '__main__':

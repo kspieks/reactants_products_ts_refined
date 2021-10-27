@@ -12,6 +12,7 @@ from rdkit import Chem
 
 from rmgpy import settings
 from rmgpy.data.rmg import RMGDatabase
+from rmgpy.exceptions import AtomTypeError
 import rmgpy.molecule.element as elements
 from rmgpy.molecule.molecule import Atom, Bond, Molecule
 
@@ -155,23 +156,26 @@ def main():
     df.insert(df.shape[1], "rmg_family", a) 
 
     for i in range(df.shape[0]):
-        # reactant
-        rsmile = df.rsmi.values[i]
-        r_mol = Chem.MolFromSmiles(rsmile, sanitize=False)
-        reactant_mols = [from_rdkit_mol(r_mol)]
-
-        # product/s
-        psmiles = df.psmi.values[i]
-        p_mols = [Chem.MolFromSmiles(psmi, sanitize=False) for psmi in psmiles.split('.')]
-        product_mols = [from_rdkit_mol(p_mol) for p_mol in p_mols] 
-        
-        # find the reaction in the RMG-database if it matches any existing templates
-        family_label = None
         try:
+            # reactant
+            rsmile = df.rsmi.values[i]
+            r_mol = Chem.MolFromSmiles(rsmile, sanitize=False)
+            reactant_mols = [from_rdkit_mol(r_mol)]
+
+            # product/s
+            psmiles = df.psmi.values[i]
+            p_mols = [Chem.MolFromSmiles(psmi, sanitize=False) for psmi in psmiles.split('.')]
+            product_mols = [from_rdkit_mol(p_mol) for p_mol in p_mols] 
+            
+            # find the reaction in the RMG-database if it matches any existing templates
+            family_label = None
+
             family_label, forward = find_reaction_family(database,
                                                          reactant_mols,
                                                          product_mols,
                                                          verbose=False)
+        except AtomTypeError as e:
+            pass
         except TypeError:
             # cannot find any matches
             pass      

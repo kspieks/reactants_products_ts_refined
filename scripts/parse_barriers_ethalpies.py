@@ -9,10 +9,12 @@ import numpy as np
 import os
 import pandas as pd
 
+from arkane.encorr.corr import assign_frequency_scale_factor
 from arkane.ess.factory import ess_factory
+from arkane.modelchem import LevelOfTheory
 
 
-def get_barriers(directory, args, df_cleaned):
+def get_barriers(directory, args, freq_lot, df_cleaned):
     """
     Computes the barrier height for a reaction by adding the zero-point energies 
     to the reactant and TS energies and taking the difference between resulting TS and reactant energies
@@ -20,6 +22,7 @@ def get_barriers(directory, args, df_cleaned):
     Args:
         directory: reaction subdirectory
         args: command line arguments
+        freq_lot: LevelOfTheory object that specifies the LoT used for frequency calculation
         df_cleaned: dataframe containing cleaned smiles
     
     Returns:
@@ -41,19 +44,25 @@ def get_barriers(directory, args, df_cleaned):
     ts_log = os.path.join(args.sp_dir, directory, f'ts{idx}.log')
     ts_energy = ess_factory(ts_log).load_energy()/4184  # convert J/mol to kcal/mol
     
+    # get ZPE scale factor
+    freq_scale_factor = assign_frequency_scale_factor(freq_lot)
+    if freq_scale_factor == 1:
+        print('WARNING: Frequency scale factor is 1')
+    zpe_scale_factor = freq_scale_factor / 1.014
+
     # parse the ZPE
     r_log = os.path.join(args.opt_freq_dir, directory, f'r{idx}.log')
-    r_zpe = ess_factory(r_log).load_zero_point_energy()/4184       # convert J/mol to kcal/mol
+    r_zpe = ess_factory(r_log).load_zero_point_energy() * zpe_scale_factor / 4184       # convert J/mol to kcal/mol
 
     ts_log = os.path.join(args.opt_freq_dir, directory, f'ts{idx}.log')
-    ts_zpe = ess_factory(ts_log).load_zero_point_energy()/4184     # convert J/mol to kcal/mol
+    ts_zpe = ess_factory(ts_log).load_zero_point_energy() * zpe_scale_factor / 4184     # convert J/mol to kcal/mol
 
     ea = (ts_energy + ts_zpe) - (r_energy + r_zpe)
 
     return [idx_int, rsmi, psmi, ea]
 
 
-def get_enthalpies(directory, args):
+def get_enthalpies(directory, args, freq_lot):
     """
     Computes the enthalpy for a reaction by adding the zero-point energies 
     to the reactant and product energies and taking the difference between resulting product and reactant energies
@@ -61,6 +70,7 @@ def get_enthalpies(directory, args):
     Args:
         directory: reaction subdirectory
         args: command line arguments
+        freq_lot: LevelOfTheory object that specifies the LoT used for frequency calculation
 
     Returns:
         dh: enthalpy for the reaction in kcal/mol
@@ -86,19 +96,25 @@ def get_enthalpies(directory, args):
         p_log = os.path.join(args.sp_dir, directory, f'p{idx}.log')
         p_energies[0] = ess_factory(p_log).load_energy()/4184  # convert J/mol to kcal/mol
 
+    # get ZPE scale factor
+    freq_scale_factor = assign_frequency_scale_factor(freq_lot)
+    if freq_scale_factor == 1:
+        print('WARNING: Frequency scale factor is 1')
+    zpe_scale_factor = freq_scale_factor / 1.014
+
     # parse the ZPE for the reactant
     r_log = os.path.join(args.opt_freq_dir, directory, f'r{idx}.log')
-    r_zpe = ess_factory(r_log).load_zero_point_energy()/4184       # convert J/mol to kcal/mol
+    r_zpe = ess_factory(r_log).load_zero_point_energy() * zpe_scale_factor / 4184       # convert J/mol to kcal/mol
     
     # parse the ZPE for the product/s
     p_zpes = np.zeros(num_products)
     if num_products > 1:
         for j in range(num_products):
             p_log = os.path.join(args.opt_freq_dir, directory, f'p{idx}_{j}.log')
-            p_zpes[j] = ess_factory(p_log).load_zero_point_energy()/4184  # convert J/mol to kcal/mol
+            p_zpes[j] = ess_factory(p_log).load_zero_point_energy() * zpe_scale_factor / 4184  # convert J/mol to kcal/mol
     else:
         p_log = os.path.join(args.opt_freq_dir, directory, f'p{idx}.log')
-        p_zpes[0] = ess_factory(p_log).load_zero_point_energy()/4184  # convert J/mol to kcal/mol
+        p_zpes[0] = ess_factory(p_log).load_zero_point_energy() * zpe_scale_factor / 4184  # convert J/mol to kcal/mol
 
     dh = (p_energies.sum() + p_zpes.sum()) - (r_energy + r_zpe)
     return dh
@@ -118,8 +134,16 @@ def parse_command_line_arguments(command_line_args=None):
     parser = argparse.ArgumentParser(description='Script for running Arkane to obtain rates')
     parser.add_argument('--opt_freq_dir', type=str, nargs=1, default='wb97xd3/qm_logs',
                         help='directory containing the Q-Chem logs from geometry optimization and frequency calculation')
+    parser.add_argument('--method', type=str, nargs=1, default='wB97X-D3',
+                        help='method used during the geometry optimization and frequency calculations')
+    parser.add_argument('--basis', type=str, nargs=1, default='def2-TZVP',
+                        help='basis used during the geometry optimization and frequency calculations')
+    parser.add_argument('--software', type=str, nargs=1, default='QChem',
+                        help='software used during the geometry optimization and frequency calculations')
+
     parser.add_argument('--sp_dir', type=str, nargs=1, default=None,
                         help='directory containing the MOLPRO logs from refined singled point calculation')
+
     parser.add_argument('--cleaned_csv', type=str, nargs=1, default='wb97xd3_cleaned.csv',
                         help='csv file of cleaned smiles')
     parser.add_argument('--out_name', type=str, nargs=1, default='wb97xd3_barriers_enthalpies.csv',
@@ -151,11 +175,12 @@ def main():
         break
 
     print('Computing barrier heights...')
-    output = Parallel(n_jobs=args.n_cpus)(delayed(get_barriers)(directory, args, df_cleaned) for directory in dirs)
+    freq_lot = LevelOfTheory(method=args.method, basis=args.basis, software=args.software)
+    output = Parallel(n_jobs=args.n_cpus)(delayed(get_barriers)(directory, args, freq_lot, df_cleaned) for directory in dirs)
     df = pd.DataFrame(output, columns=['idx', 'rsmi', 'psmi', 'ea'])
 
     print('Computing enthalpies...')
-    dhs = Parallel(n_jobs=args.n_cpus)(delayed(get_enthalpies)(directory, args) for directory in dirs)
+    dhs = Parallel(n_jobs=args.n_cpus)(delayed(get_enthalpies)(directory, args, freq_lot) for directory in dirs)
     df.insert(df.shape[1], 'dh', dhs)
 
     df.to_csv(args.out_name, index=False)

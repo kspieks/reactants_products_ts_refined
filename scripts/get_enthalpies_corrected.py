@@ -41,14 +41,13 @@ def log_to_enthalpy(smiles, freq_lot, energy_lot, freq_log_path, energy_log_path
     assert any(isinstance(mode, HarmonicOscillator) for mode in conformer.modes)
     
     # pass coords, nums, masses through function
-    nums = energy_log.load_geometry()[1]
-    coords = energy_log.load_geometry()[0]
-    masses = energy_log.load_geometry()[2]
+    coords, nums, mass = freq_log.load_geometry()
+    assert len(nums) > 1
     
     atoms = Counter(symbol_by_number[int(n)] for n in nums)
     conformer.coordinates = (coords, 'angstroms')
     conformer.number = nums
-    conformer.mass = (masses, 'amu')
+    conformer.mass = (mass, 'amu')
     
     freq_scale_factor = assign_frequency_scale_factor(freq_lot)
     if freq_scale_factor == 1:

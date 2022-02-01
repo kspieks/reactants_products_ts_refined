@@ -50,6 +50,10 @@ def log_to_enthalpy(smiles, freq_lot, energy_lot, freq_log_path, energy_log_path
     conformer.mass = (mass, 'amu')
     
     freq_scale_factor = assign_frequency_scale_factor(freq_lot)
+    frequencies = conformer.modes[2].frequencies.value_si
+    for mode in conformer.modes:
+        if isinstance(mode, HarmonicOscillator):
+            mode.frequencies = (frequencies * freq_scale_factor, "cm^-1")
     if freq_scale_factor == 1:
         print('WARNING: Frequency scale factor is 1')
     zpe_scale_factor = freq_scale_factor / 1.014

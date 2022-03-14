@@ -177,7 +177,7 @@ def main():
     print('Computing barrier heights...')
     freq_lot = LevelOfTheory(method=args.method, basis=args.basis, software=args.software)
     output = Parallel(n_jobs=args.n_cpus)(delayed(get_barriers)(directory, args, freq_lot, df_cleaned) for directory in dirs)
-    df = pd.DataFrame(output, columns=['idx', 'rsmi', 'psmi', 'ea'])
+    df = pd.DataFrame(output, columns=['idx', 'rsmi', 'psmi', 'dE0'])
 
     print('Computing enthalpies...')
     dhs = Parallel(n_jobs=args.n_cpus)(delayed(get_enthalpies)(directory, args, freq_lot) for directory in dirs)
